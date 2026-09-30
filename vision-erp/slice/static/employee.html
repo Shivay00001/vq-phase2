@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionERP — Employee self-service</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="top"></header>
+<nav class="tabs"></nav>
+<main><div id="flash"></div>
+  <section class="panel on" id="tab-home"></section>
+  <section class="panel" id="tab-leave"></section>
+  <section class="panel" id="tab-att"></section>
+  <section class="panel" id="tab-crm"></section>
+  <section class="panel" id="tab-tickets"></section>
+</main>
+<script src="/app.js"></script>
+<script>
+"use strict";
+const u = guard(["employee", "manager", "admin"]);
+if (u) {
+topbar(u, "VisionERP — Employee self-service");
+tabs([
+  { id: "home", label: "My profile" }, { id: "leave", label: "Leave" },
+  { id: "att", label: "Attendance" }, { id: "crm", label: "My CRM" },
+  { id: "tickets", label: "My tickets" },
+], load);
+
+async function load(id) {
+  ({ home: loadHome, leave: loadLeave, att: loadAtt, crm: loadCrm, tickets: loadTickets }[id])();
+}
+
+async function loadHome() {
+  const w = el("div"); w.appendChild(el("h3", "My profile"));
+  try {
+    const e = await api("GET", "/employees/me");
+    const c = el("div", null, { "class": "cards" });
+    [["Name", e.full_name], ["Email", e.email], ["Department", e.department],
+     ["Designation", e.designation], ["Joined", e.date_of_joining]].forEach(([k, v]) => {
+      const d = el("div", null, { "class": "card" });
+      d.appendChild(el("div", k, { "class": "k" })); d.appendChild(el("div", v, { "class": "v", "style": "font-size:16px" }));
+      c.appendChild(d);
+    });
+    w.appendChild(c);
+  } catch (e) { w.appendChild(el("p", "No employee record linked: " + e.message, { "class": "err" })); }
+  mount("home", w);
+}
+
+async function loadLeave() {
+  const w = el("div"); w.appendChild(el("h3", "Leave"));
+  try {
+    const b = await api("GET", "/leave/balances");
+    const c = el("div", null, { "class": "cards" });
+    b.balances.forEach(x => {
+      const d = el("div", null, { "class": "card" });
+      d.appendChild(el("div", x.leave_type + " (" + x.year + ")", { "class": "k" }));
+      d.appendChild(el("div", x.balance_days + " days", { "class": "v" }));
+      c.appendChild(d);
+    });
+    w.appendChild(c);
+  } catch (e) { w.appendChild(el("p", e.message, { "class": "err" })); }
+  w.appendChild(await formDialog("Apply for leave", [
+    { label: "Type", name: "leave_type", type: "select", options: ["casual", "sick", "earned"] },
+    { label: "Start", name: "start_date", type: "date", required: 1 },
+    { label: "End", name: "end_date", type: "date", required: 1 },
+    { label: "Reason", name: "reason", type: "textarea" },
+  ], async (b) => { await api("POST", "/leave/requests", b); loadLeave(); }));
+  const lr = await api("GET", "/leave/requests?per_page=50");
+  w.appendChild(el("h4", "My requests"));
+  w.appendChild(table(["Type", "Dates", "Days", "Status", ""],
+    lr.items, r => {
+      const acts = el("div", null, { "class": "row" });
+      if (r.status === "pending")
+        acts.appendChild(btn("Cancel", "danger", async () => {
+          await api("POST", "/leave/requests/" + r.id + "/cancel", {});
+          showOk("Cancelled."); loadLeave();
+        }));
+      return tdRow([r.leave_type, r.start_date + " → " + r.end_date, r.days, pill(r.status), acts]);
+    }));
+  mount("leave", w);
+}
+
+async function loadAtt() {
+  const w = el("div"); w.appendChild(el("h3", "Attendance"));
+  const row = el("div", null, { "class": "row" });
+  row.appendChild(btn("Check in", "ok", async () => {
+    const r = await api("POST", "/attendance/check-in", {});
+    showOk("Checked in at " + r.check_in.slice(11, 16) + "."); loadAtt();
+  }));
+  row.appendChild(btn("Check out", "", async () => {
+    const r = await api("POST", "/attendance/check-out", {});
+    showOk("Checked out at " + r.check_out.slice(11, 16) + "."); loadAtt();
+  }));
+  w.appendChild(row);
+  const a = await api("GET", "/attendance?per_page=30");
+  w.appendChild(table(["Date", "Check-in", "Check-out", "Note"],
+    a.items, r => tdRow([r.work_date, r.check_in.slice(11, 16),
+      r.check_out ? r.check_out.slice(11, 16) : pill("open"), r.note || "—"])));
+  mount("att", w);
+}
+
+async function loadCrm() {
+  const w = el("div"); w.appendChild(el("h3", "My CRM"));
+  const [contacts, deals] = await Promise.all([
+    api("GET", "/contacts?per_page=100"), api("GET", "/deals?per_page=100")]);
+  w.appendChild(el("h4", "My contacts"));
+  w.appendChild(table(["Name", "Email", "Company"],
+    contacts.items, c => tdRow([c.name, c.email, c.company_name])));
+  w.appendChild(el("h4", "My deals"));
+  w.appendChild(table(["Title", "Value", "Stage", "Prob"],
+    deals.items, d => tdRow([d.title, money(d.value), pill(d.stage), d.probability + "%"])));
+  w.appendChild(await formDialog("Log activity on a deal", [
+    { label: "Deal ID", name: "deal_id", num: 1, required: 1 },
+    { label: "Kind", name: "kind", type: "select", options: ["note", "call", "email", "meeting"] },
+    { label: "Details", name: "body", type: "textarea", required: 1 },
+  ], async (b) => {
+    const id = b.deal_id; delete b.deal_id;
+    await api("POST", "/deals/" + id + "/activities", b); loadCrm();
+  }));
+  mount("crm", w);
+}
+
+async function loadTickets() {
+  const w = el("div"); w.appendChild(el("h3", "My tickets"));
+  w.appendChild(await formDialog("Open a ticket", [
+    { label: "Subject", name: "subject", required: 1 },
+    { label: "Details", name: "body", type: "textarea", required: 1 },
+    { label: "Priority", name: "priority", type: "select", options: ["low", "medium", "high"] },
+  ], async (b) => { await api("POST", "/tickets", b); loadTickets(); }));
+  const t = await api("GET", "/tickets?per_page=50");
+  w.appendChild(table(["#", "Subject", "Priority", "Status"],
+    t.items, r => tdRow([r.id, r.subject, r.priority, pill(r.status)])));
+  mount("tickets", w);
+}
+load("home");
+}
+</script>
+</body></html>

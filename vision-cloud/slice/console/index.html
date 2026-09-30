@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VisionCloud Console — v0 slice</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:960px;margin:0 auto;padding:16px;background:#0f1420;color:#e8ecf4}
+  h1{font-size:20px} h2{font-size:16px;margin-top:24px}
+  .card{background:#182032;border:1px solid #2a3550;border-radius:8px;padding:12px;margin:8px 0}
+  input,button{padding:8px;margin:4px;border-radius:6px;border:1px solid #2a3550;background:#0f1420;color:#e8ecf4}
+  button{cursor:pointer;background:#2456c8;border-color:#2456c8} button:hover{background:#1b44a5}
+  button.danger{background:#8c2b2b;border-color:#8c2b2b}
+  table{width:100%;border-collapse:collapse;font-size:13px} td,th{border-bottom:1px solid #2a3550;padding:6px;text-align:left}
+  code{font-size:12px;word-break:break-all} .muted{color:#8a94ad;font-size:12px}
+  .warn{background:#3a2b12;border:1px solid #8a6d1f;border-radius:8px;padding:10px;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+<h1>☁️ VisionCloud Console <span class="muted">v0 slice — local dev, test keys only</span></h1>
+<div class="warn"><b>Honest label:</b> this talks to a single-disk dev backend on localhost.
+No replication, no billing, no TLS. Do not use real secrets here — paste only the
+<em>test</em> key the server printed / issued.</div>
+
+<div class="card">
+<h2>1. Credentials</h2>
+<input id="keyId" placeholder="Key ID" size="28">
+<input id="secret" type="password" placeholder="Secret" size="44">
+<button onclick="saveCreds()">Use these keys</button>
+<span id="credState" class="muted"></span>
+</div>
+
+<div class="card">
+<h2>2. Buckets</h2>
+<input id="newBucket" placeholder="new-bucket-name" size="28">
+<button onclick="createBucket()">Create bucket</button>
+<button onclick="listBuckets()">Refresh</button>
+<table id="buckets"><tr><th>Name</th><th>Objects</th><th>Bytes</th><th></th></tr></table>
+</div>
+
+<div class="card">
+<h2>3. Objects <span id="curBucket" class="muted"></span></h2>
+<input type="file" id="fileInput">
+<button onclick="upload()">Upload</button>
+<button onclick="listObjects()">Refresh</button>
+<input id="prefix" placeholder="prefix filter" size="20">
+<table id="objects"><tr><th>Key</th><th>Size</th><th>ETag</th><th></th></tr></table>
+</div>
+
+<div class="card">
+<h2>4. Admin</h2>
+<button onclick="listKeys()">List keys</button>
+<button onclick="showUsage()">Usage</button>
+<button onclick="showAudit()">Audit log</button>
+<input id="qBytes" placeholder="quota bytes" size="14" value="1073741824">
+<input id="qReqs" placeholder="reqs/day" size="10" value="10000">
+<button onclick="createKey()">Issue key</button>
+<pre id="adminOut" class="muted"></pre>
+</div>
+
+<script>
+const API = location.origin;
+let KEY_ID = localStorage.getItem('vc_key') || '';
+let SECRET = localStorage.getItem('vc_secret') || '';
+keyId.value = KEY_ID; secret.value = SECRET;
+if (KEY_ID) credState.textContent = 'using saved key: ' + KEY_ID;
+
+function saveCreds(){ KEY_ID = keyId.value.trim(); SECRET = secret.value.trim();
+  localStorage.setItem('vc_key', KEY_ID); localStorage.setItem('vc_secret', SECRET);
+  credState.textContent = 'using key: ' + KEY_ID; }
+
+async function sha256hex(buf){
+  const d = await crypto.subtle.digest('SHA-256', buf); return hex(d); }
+function hex(buf){ return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join(''); }
+async function hmacHex(secret, msg){
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg))); }
+
+async function sign(method, path, query, body){
+  const enc = new TextEncoder();
+  const bodyHash = await sha256hex(body || new Uint8Array());
+  const qs = Object.keys(query).sort().map(k=>k+'='+query[k]).join('&');
+  const date = String(Math.floor(Date.now()/1000));
+  const canon = [method, path, qs, date, bodyHash].join('\n');
+  const sig = await hmacHex(SECRET, 'VC-HMAC-SHA256\n' + canon);
+  return { 'Authorization': 'VC-HMAC-SHA256 Credential='+KEY_ID+', Signature='+sig,
+           'X-VC-Date': date };
+}
+
+async function call(method, rawPath, query={}, body=null, ctype=null){
+  // rawPath is the UNENCODED path ("/bucket/some key"); the server verifies the
+  // signature over the percent-DECODED path, so we sign rawPath and encode only
+  // for the wire.
+  const urlPath = rawPath.split('/').map(encodeURIComponent).join('/');
+  const q = Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
+  let raw = null;
+  if (body instanceof Uint8Array) raw = body;
+  else if (body) raw = new TextEncoder().encode(typeof body === 'string' ? body : JSON.stringify(body));
+  const h2 = await sign(method, rawPath, query, raw);
+  if (ctype) h2['Content-Type'] = ctype;
+  const r = await fetch(API + urlPath + q, {method, headers: h2, body: raw});
+  const txt = await r.text();
+  let j = null; try { j = JSON.parse(txt); } catch(e){}
+  if (!r.ok) throw new Error(r.status + ' ' + (j?.error?.code || txt.slice(0,120)));
+  return j ?? txt;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let CUR = '';
+async function listBuckets(){
+  const j = await call('GET','/',{all:'1'}).catch(e=>{alert(e.message);return null;});
+  if(!j) return;
+  buckets.innerHTML = '<tr><th>Name</th><th>Objects</th><th>Bytes</th><th></th></tr>' +
+    j.buckets.map(b=>`<tr><td><code>${esc(b.name)}</code></td><td>${b.objects}</td><td>${b.bytes}</td>
+      <td><button onclick="openBucket('${esc(b.name)}')">Open</button>
+      <button class="danger" onclick="delBucket('${esc(b.name)}')">Delete</button></td></tr>`).join('');
+}
+async function createBucket(){ const n = newBucket.value.trim(); if(!n) return;
+  await call('PUT','/'+n).catch(e=>alert(e.message)); listBuckets(); }
+async function delBucket(n){ if(!confirm('Delete bucket '+n+'? (must be empty)')) return;
+  await call('DELETE','/'+n).catch(e=>alert(e.message));
+  if (CUR===n){CUR='';curBucket.textContent='';objects.innerHTML='';} listBuckets(); }
+async function openBucket(n){ CUR=n; curBucket.textContent='— '+n; listObjects(); }
+
+async function listObjects(){
+  if(!CUR){alert('open a bucket first');return;}
+  const j = await call('GET','/'+CUR,{list:'',prefix:prefix.value,'max-keys':'200'})
+    .catch(e=>{alert(e.message);return null;});
+  if(!j) return;
+  objects.innerHTML = '<tr><th>Key</th><th>Size</th><th>ETag</th><th></th></tr>' +
+    j.objects.map(o=>`<tr><td><code>${esc(o.key)}</code></td><td>${o.size}</td>
+      <td><code>${esc(o.etag.slice(0,12))}…</code></td>
+      <td><button onclick="download('${esc(o.key)}')">Download</button>
+      <button onclick="presign('${esc(o.key)}')">Presigned link</button>
+      <button class="danger" onclick="delObj('${esc(o.key)}')">Delete</button></td></tr>`).join('')
+    + (j.truncated ? '<tr><td colspan=4 class=muted>truncated…</td></tr>' : '');
+}
+
+async function upload(){
+  const f = fileInput.files[0]; if(!f||!CUR){alert('pick a file and open a bucket');return;}
+  const buf = new Uint8Array(await f.arrayBuffer());
+    if (buf.length <= 8*1024*1024){
+    await call('PUT', '/'+CUR+'/'+f.name, {}, buf, f.type||'application/octet-stream')
+      .catch(e=>alert(e.message));
+  } else {
+    // multipart for large files, 5 MB parts
+    const init = await call('POST','/'+CUR+'/'+f.name,{uploads:''}).catch(e=>{alert(e.message);return null;});
+    if(!init) return;
+    const uid = init.upload_id, PS = 5*1024*1024, parts = [];
+    for(let i=0, n=1; i<buf.length; i+=PS, n++){
+      const chunk = buf.slice(i, i+PS);
+      const r = await call('PUT','/'+CUR+'/'+f.name,
+        {partNumber:String(n), uploadId:uid}, chunk, 'application/octet-stream');
+      parts.push({part_number:n, etag:r.etag});
+    }
+    await call('POST','/'+CUR+'/'+f.name,{uploadId:uid},{parts})
+      .catch(e=>alert(e.message));
+  }
+  listObjects();
+}
+async function download(key){
+  const q = { 'X-VC-Expires': String(Math.floor(Date.now()/1000)+3600), 'X-VC-KeyId': KEY_ID };
+  q['X-VC-Signature'] = await hmacHex(SECRET, 'GET\n/'+CUR+'/'+key+'\n'+q['X-VC-Expires']);
+  location.href = API + '/' + CUR + '/' + key.split('/').map(encodeURIComponent).join('/')
+    + '?' + new URLSearchParams(q).toString();
+}
+async function presign(key){
+  const q = { 'X-VC-Expires': String(Math.floor(Date.now()/1000)+3600), 'X-VC-KeyId': KEY_ID };
+  q['X-VC-Signature'] = await hmacHex(SECRET, 'GET\n/'+CUR+'/'+key+'\n'+q['X-VC-Expires']);
+  const url = API + '/' + CUR + '/' + key.split('/').map(encodeURIComponent).join('/')
+    + '?' + new URLSearchParams(q).toString();
+  await navigator.clipboard.writeText(url).catch(()=>{});
+  alert('Presigned URL (1h) copied:\n'+url);
+}
+async function delObj(key){ if(!confirm('Delete '+key+'?')) return;
+  await call('DELETE','/'+CUR+'/'+key)
+    .catch(e=>alert(e.message)); listObjects(); }
+
+async function listKeys(){ adminOut.textContent = JSON.stringify(
+  await call('GET','/admin/keys').catch(e=>({error:e.message})), null, 1); }
+async function showUsage(){ adminOut.textContent = JSON.stringify(
+  await call('GET','/admin/usage').catch(e=>({error:e.message})), null, 1); }
+async function showAudit(){ adminOut.textContent = JSON.stringify(
+  await call('GET','/admin/audit',{limit:'20'}).catch(e=>({error:e.message})), null, 1); }
+async function createKey(){
+  const j = await call('POST','/admin/keys',{},
+    {quota_bytes:parseInt(qBytes.value)||1073741824, quota_reqs_per_day:parseInt(qReqs.value)||10000})
+    .catch(e=>{alert(e.message);return null;});
+  if(j){ adminOut.textContent = 'ISSUED — copy the secret now (shown once):\n' + JSON.stringify(j, null, 1); }
+}
+listBuckets();
+</script>
+</body>
+</html>

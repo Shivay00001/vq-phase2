@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionERP — Client portal</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="top"></header>
+<nav class="tabs"></nav>
+<main><div id="flash"></div>
+  <section class="panel on" id="tab-deals"></section>
+  <section class="panel" id="tab-inv"></section>
+</main>
+<script src="/app.js"></script>
+<script>
+"use strict";
+const u = guard(["partner", "admin"]);
+if (u) {
+topbar(u, "VisionERP — Client portal");
+tabs([{ id: "deals", label: "My orders / deals" }, { id: "inv", label: "My invoices" }], load);
+async function load(id) { ({ deals: loadDeals, inv: loadInv }[id])(); }
+
+async function loadDeals() {
+  const w = el("div");
+  w.appendChild(el("h3", "Orders & deals for your company"));
+  w.appendChild(el("p", "Read-only view. Contact your account manager for changes.",
+    { "class": "mut" }));
+  const d = await api("GET", "/deals?per_page=100");
+  w.appendChild(table(["Title", "Value", "Stage", "Probability", "Expected close"],
+    d.items, r => tdRow([r.title, money(r.value), pill(r.stage),
+      r.probability + "%", fmtDate(r.expected_close)])));
+  mount("deals", w);
+}
+
+async function loadInv() {
+  const w = el("div"); w.appendChild(el("h3", "Invoices"));
+  const inv = await api("GET", "/invoices?per_page=100");
+  w.appendChild(table(["Invoice no", "Issued", "Due", "Total", "Status", ""],
+    inv.items, r => {
+      const acts = el("div", null, { "class": "row" });
+      acts.appendChild(btn("Details", "ghost", async () => {
+        const d = await api("GET", "/invoices/" + r.id);
+        alert(d.invoice_no + "\n" + d.items.map(i =>
+          "• " + i.description + " — " + i.qty + " × ₹" + i.unit_price + " = ₹" + i.line_total
+        ).join("\n") + "\nSubtotal ₹" + d.subtotal + " + GST " + d.tax_percent +
+          "% (₹" + d.tax_amount + ") = ₹" + d.total);
+      }));
+      return tdRow([r.invoice_no, fmtDate(r.issue_date), fmtDate(r.due_date),
+        money(r.total), pill(r.status), acts]);
+    }));
+  const due = inv.items.filter(r => r.status === "sent")
+    .reduce((a, r) => a + r.total, 0);
+  w.appendChild(el("p", "Outstanding (sent, unpaid): " + money(due), { "class": "mut" }));
+  mount("inv", w);
+}
+load("deals");
+}
+</script>
+</body></html>

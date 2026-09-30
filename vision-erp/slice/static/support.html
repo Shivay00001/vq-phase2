@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionERP — Support desk</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="top"></header>
+<nav class="tabs"></nav>
+<main><div id="flash"></div>
+  <section class="panel on" id="tab-queue"></section>
+  <section class="panel" id="tab-lookup"></section>
+</main>
+<script src="/app.js"></script>
+<script>
+"use strict";
+const u = guard(["support", "admin"]);
+if (u) {
+topbar(u, "VisionERP — Support desk");
+tabs([{ id: "queue", label: "Ticket queue" }, { id: "lookup", label: "User lookup" }], load);
+async function load(id) { ({ queue: loadQueue, lookup: loadLookup }[id])(); }
+
+async function loadQueue() {
+  const w = el("div"); w.appendChild(el("h3", "Ticket queue"));
+  const f = el("div", null, { "class": "row" });
+  const sel = select("st", [["", "all"], "open", "in_progress", "resolved", "closed"]);
+  const go = btn("Filter", "ghost", () => render(sel.value));
+  f.appendChild(el("label", "Status")); f.appendChild(sel); f.appendChild(go);
+  w.appendChild(f);
+  const body = el("div"); w.appendChild(body);
+  async function render(status) {
+    const t = await api("GET", "/tickets" + (status ? "?status=" + status : "") + "&per_page=100");
+    body.replaceChildren();
+    body.appendChild(table(["#", "Subject", "Details", "Priority", "Status", "Requester", ""],
+      t.items, r => {
+        const acts = el("div", null, { "class": "row" });
+        ["in_progress", "resolved", "closed"].forEach(s => {
+          if (s !== r.status)
+            acts.appendChild(btn(s, "", async () => {
+              await api("POST", "/tickets/" + r.id + "/status", { status: s });
+              showOk("Ticket #" + r.id + " → " + s + "."); render(status);
+            }));
+        });
+        return tdRow([r.id, r.subject, r.body.slice(0, 80), r.priority, pill(r.status),
+          r.requester_name || "—", acts]);
+      }));
+  }
+  await render("");
+  mount("queue", w);
+}
+
+async function loadLookup() {
+  const w = el("div");
+  w.appendChild(el("h3", "User lookup"));
+  w.appendChild(el("p", "Support sees limited fields only: name, department, designation. " +
+    "No email, phone, or salary — enforced server-side.", { "class": "mut" }));
+  w.appendChild(await formDialog("Find user", [
+    { label: "User ID", name: "uid", num: 1, required: 1 },
+  ], async (b) => {
+    const r = await api("GET", "/users/" + b.uid);
+    const d = el("div", null, { "class": "cards" });
+    [["Name", r.full_name], ["Department", r.department || "—"], ["Designation", r.designation || "—"]]
+      .forEach(([k, v]) => {
+        const c = el("div", null, { "class": "card" });
+        c.appendChild(el("div", k, { "class": "k" }));
+        c.appendChild(el("div", v, { "class": "v", style: "font-size:16px" }));
+        d.appendChild(c);
+      });
+    out.replaceChildren(d);
+  }));
+  const out = el("div"); w.appendChild(out);
+  mount("lookup", w);
+}
+load("queue");
+}
+</script>
+</body></html>

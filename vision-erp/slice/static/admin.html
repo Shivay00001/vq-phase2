@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionERP — Admin console</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="top"></header>
+<nav class="tabs"></nav>
+<main><div id="flash"></div>
+  <section class="panel on" id="tab-dash"></section>
+  <section class="panel" id="tab-crm"></section>
+  <section class="panel" id="tab-inv"></section>
+  <section class="panel" id="tab-leave"></section>
+  <section class="panel" id="tab-att"></section>
+  <section class="panel" id="tab-tickets"></section>
+  <section class="panel" id="tab-users"></section>
+  <section class="panel" id="tab-audit"></section>
+</main>
+<script src="/app.js"></script>
+<script>
+"use strict";
+const u = guard(["admin", "manager"]);
+if (u) {
+topbar(u, "VisionERP — Admin console");
+const isAdmin = u.role === "admin";
+const TABS = [
+  { id: "dash", label: "Dashboard" }, { id: "crm", label: "CRM" },
+  { id: "inv", label: "Invoices" }, { id: "leave", label: "Leave approvals" },
+  { id: "att", label: "Attendance" }, { id: "tickets", label: "Tickets" },
+];
+if (isAdmin) { TABS.push({ id: "users", label: "Users" }, { id: "audit", label: "Audit log" }); }
+tabs(TABS, load);
+
+async function load(id) {
+  ({ dash: loadDash, crm: loadCrm, inv: loadInv, leave: loadLeave, att: loadAtt,
+     tickets: loadTickets, users: loadUsers, audit: loadAudit }[id] || (() => {}))();
+}
+
+async function loadDash() {
+  const w = el("div"); w.appendChild(el("h3", "Dashboard"));
+  const cards = el("div", null, { "class": "cards" });
+  const [pipe, leaves, tickets, inv] = await Promise.all([
+    api("GET", "/deals/pipeline"), api("GET", "/leave/requests?status=pending"),
+    api("GET", "/tickets?status=open"), api("GET", "/invoices?status=sent"),
+  ]);
+  const wv = pipe.stages.reduce((a, s) => a + s.weighted_value, 0);
+  [["Pipeline (weighted)", money(wv)],
+   ["Pending leave requests", leaves.total],
+   ["Open tickets", tickets.total],
+   ["Unpaid sent invoices", inv.total]].forEach(([k, v]) => {
+    const c = el("div", null, { "class": "card" });
+    c.appendChild(el("div", k, { "class": "k" })); c.appendChild(el("div", v, { "class": "v" }));
+    cards.appendChild(c);
+  });
+  w.appendChild(cards);
+  w.appendChild(el("h4", "Pipeline by stage"));
+  w.appendChild(table(["Stage", "Deals", "Total value", "Weighted"],
+    pipe.stages, s => tdRow([s.stage, s.count, money(s.total_value), money(s.weighted_value)])));
+  mount("dash", w);
+}
+
+async function loadCrm() {
+  const w = el("div"); w.appendChild(el("h3", "CRM"));
+  const [contacts, deals] = await Promise.all([
+    api("GET", "/contacts?per_page=100"), api("GET", "/deals?per_page=100")]);
+  w.appendChild(el("h4", "Contacts"));
+  w.appendChild(table(["Name", "Email", "Company", "Owner"],
+    contacts.items, c => tdRow([c.name, c.email, c.company_name, c.owner_user_id || "—"])));
+  w.appendChild(await formDialog("New contact", [
+    { label: "Name", name: "name", required: 1 }, { label: "Email", name: "email" },
+    { label: "Phone", name: "phone" }, { label: "Company", name: "company_name" },
+  ], async (b) => { await api("POST", "/contacts", b); loadCrm(); }));
+  w.appendChild(el("h4", "Deals"));
+  const stageOpts = ["new","contacted","qualified","proposal","negotiation","won","lost"];
+  w.appendChild(table(["Title", "Contact", "Value", "Stage", "Prob %", ""],
+    deals.items, d => {
+      const sel = select("st", stageOpts, d.stage);
+      const go = btn("Set", "", async () => {
+        await api("PATCH", "/deals/" + d.id, { stage: sel.value });
+        showOk("Stage updated."); loadCrm();
+      });
+      const wrap = el("div", null, { "class": "row" }); wrap.appendChild(sel); wrap.appendChild(go);
+      return tdRow([d.title, d.contact_name, money(d.value), pill(d.stage),
+        d.probability + "%", wrap]);
+    }));
+  w.appendChild(await formDialog("New deal", [
+    { label: "Contact ID", name: "contact_id", num: 1, required: 1 },
+    { label: "Title", name: "title", required: 1 },
+    { label: "Value (₹)", name: "value", num: 1, required: 1 },
+  ], async (b) => { await api("POST", "/deals", b); loadCrm(); }));
+  mount("crm", w);
+}
+
+async function loadInv() {
+  const w = el("div"); w.appendChild(el("h3", "Invoices"));
+  const inv = await api("GET", "/invoices?per_page=100");
+  w.appendChild(table(["No", "Contact", "Total", "Status", ""],
+    inv.items, r => {
+      const acts = el("div", null, { "class": "row" });
+      ["sent", "paid", "cancelled"].forEach(s => {
+        acts.appendChild(btn(s, "", async () => {
+          await api("POST", "/invoices/" + r.id + "/status", { status: s });
+          showOk("Invoice " + s + "."); loadInv();
+        }));
+      });
+      acts.appendChild(btn("View", "ghost", async () => {
+        const d = await api("GET", "/invoices/" + r.id);
+        alert(d.invoice_no + " — " + d.items.map(i =>
+          i.description + " x" + i.qty + " @ ₹" + i.unit_price).join("\n"));
+      }));
+      return tdRow([r.invoice_no, r.contact_name, money(r.total), pill(r.status), acts]);
+    }));
+  w.appendChild(el("h4", "Create invoice from a won deal"));
+  const deals = await api("GET", "/deals?stage=won&per_page=100");
+  // keep deals that don't already have an invoice (checked client-side; server enforces too)
+  const withInv = new Set();
+  const opts = [];
+  for (const d of deals.items) {
+    const full = await api("GET", "/deals/" + d.id);
+    if (!full.invoice) opts.push([d.id, d.id + " — " + d.title]);
+  }
+  if (!opts.length) w.appendChild(el("p", "No won deals without invoices.", { "class": "mut" }));
+  else {
+    const f = el("div", null, { "class": "row" });
+    const sel = select("deal", opts); f.appendChild(sel);
+    f.appendChild(btn("Create invoice", "ok", async () => {
+      const r = await api("POST", "/invoices/from-deal/" + sel.value, {
+        items: [{ description: "Services per agreement", qty: 1, unit_price: 1000 }],
+        tax_percent: 18 });
+      showOk("Created " + r.invoice_no + " for " + money(r.total) + "."); loadInv();
+    }));
+    w.appendChild(f);
+    w.appendChild(el("p", "Demo creates a single ₹1,000 line item; the API accepts full item lists.",
+      { "class": "mut" }));
+  }
+  mount("inv", w);
+}
+
+async function loadLeave() {
+  const w = el("div"); w.appendChild(el("h3", "Leave approvals"));
+  const lr = await api("GET", "/leave/requests?status=pending&per_page=100");
+  w.appendChild(table(["Employee", "Type", "Dates", "Days", "Reason", ""],
+    lr.items, r => {
+      const acts = el("div", null, { "class": "row" });
+      acts.appendChild(btn("Approve", "ok", async () => {
+        await api("POST", "/leave/requests/" + r.id + "/approve", {});
+        showOk("Approved."); loadLeave();
+      }));
+      acts.appendChild(btn("Reject", "danger", async () => {
+        await api("POST", "/leave/requests/" + r.id + "/reject", { reason: "Rejected via console" });
+        showOk("Rejected."); loadLeave();
+      }));
+      return tdRow([r.employee_name, r.leave_type,
+        r.start_date + " → " + r.end_date, r.days, r.reason, acts]);
+    }));
+  w.appendChild(el("h4", "Recent decisions"));
+  const done = await api("GET", "/leave/requests?per_page=20");
+  w.appendChild(table(["Employee", "Type", "Dates", "Status"],
+    done.items.filter(r => r.status !== "pending"),
+    r => tdRow([r.employee_name, r.leave_type, r.start_date + " → " + r.end_date, pill(r.status)])));
+  mount("leave", w);
+}
+
+async function loadAtt() {
+  const w = el("div"); w.appendChild(el("h3", "Attendance (today)"));
+  const emps = await api("GET", "/employees?per_page=100");
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = [];
+  for (const e of emps.items) {
+    const a = await api("GET", "/attendance?employee_id=" + e.id + "&per_page=5");
+    const t = a.items.find(x => x.work_date === today);
+    rows.push([e.full_name, e.department, t ? (t.check_in.slice(11, 16) + " → " + (t.check_out ? t.check_out.slice(11, 16) : "open")) : "—"]);
+  }
+  w.appendChild(table(["Employee", "Department", "Today"], rows, r => tdRow(r)));
+  mount("att", w);
+}
+
+async function loadTickets() {
+  const w = el("div"); w.appendChild(el("h3", "Support tickets"));
+  const t = await api("GET", "/tickets?per_page=100");
+  w.appendChild(table(["#", "Subject", "Priority", "Status", "Requester", ""],
+    t.items, r => {
+      const acts = el("div", null, { "class": "row" });
+      ["in_progress", "resolved", "closed"].forEach(s => {
+        acts.appendChild(btn(s, "", async () => {
+          await api("POST", "/tickets/" + r.id + "/status", { status: s });
+          showOk("Ticket " + s + "."); loadTickets();
+        }));
+      });
+      return tdRow([r.id, r.subject, r.priority, pill(r.status), r.requester_name || "—", acts]);
+    }));
+  mount("tickets", w);
+}
+
+async function loadUsers() {
+  const w = el("div"); w.appendChild(el("h3", "Users"));
+  const users = await api("GET", "/users?per_page=100");
+  w.appendChild(table(["Username", "Name", "Role", "Active", ""],
+    users.items, x => {
+      const acts = el("div", null, { "class": "row" });
+      ["admin", "manager", "employee", "support", "partner"].forEach(role => {
+        if (role !== x.role)
+          acts.appendChild(btn(role, "", async () => {
+            await api("PATCH", "/users/" + x.id, { role });
+            showOk(x.username + " → " + role + "."); loadUsers();
+          }));
+      });
+      acts.appendChild(btn(x.is_active ? "Deactivate" : "Activate", "danger", async () => {
+        await api("PATCH", "/users/" + x.id, { is_active: !x.is_active });
+        showOk("Updated."); loadUsers();
+      }));
+      return tdRow([x.username, x.full_name, x.role, x.is_active ? "yes" : "no", acts]);
+    }));
+  w.appendChild(await formDialog("New user", [
+    { label: "Username", name: "username", required: 1 },
+    { label: "Password (≥8)", name: "password", type: "password", required: 1 },
+    { label: "Full name", name: "full_name", required: 1 },
+    { label: "Role", name: "role", type: "select",
+      options: ["admin", "manager", "employee", "support", "partner"] },
+  ], async (b) => { await api("POST", "/users", b); loadUsers(); }));
+  mount("users", w);
+}
+
+async function loadAudit() {
+  const w = el("div"); w.appendChild(el("h3", "Audit log"));
+  const a = await api("GET", "/audit?per_page=100");
+  w.appendChild(table(["Time", "Actor", "Action", "Entity", "ID"],
+    a.items, r => tdRow([r.created_at.slice(0, 19), r.actor, r.action, r.entity, r.entity_id || "—"])));
+  mount("audit", w);
+}
+load("dash");
+}
+</script>
+</body></html>

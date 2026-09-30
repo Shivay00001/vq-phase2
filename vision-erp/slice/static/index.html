@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionERP — Sign in</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<div class="login-wrap">
+  <h2>VisionERP <span class="mut">slice v0.1</span></h2>
+  <p class="mut">ERP · CRM · HRMS prototype. Sign in with a demo account.</p>
+  <form id="f" class="grid" style="grid-template-columns:1fr">
+    <div><label>Username</label><input name="username" autocomplete="username" required></div>
+    <div><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
+    <div><button class="act" type="submit" style="width:100%">Sign in</button></div>
+  </form>
+  <div id="flash"></div>
+  <div class="demo-creds">
+    Demo logins — password for all: <code>demo1234</code><br>
+    <code>admin</code> (admin) · <code>meera</code> (manager) · <code>arjun</code>/<code>kavya</code> (employee)<br>
+    <code>sana</code> (support) · <code>rohan</code> (partner/client) · <code>vikram</code> (other tenant)
+  </div>
+</div>
+<script src="/app.js"></script>
+<script>
+"use strict";
+const HOME = { admin: "/admin.html", manager: "/admin.html", employee: "/employee.html",
+               support: "/support.html", partner: "/partner.html" };
+document.getElementById("f").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  try {
+    const r = await api("POST", "/auth/login",
+      { username: fd.get("username"), password: fd.get("password") });
+    localStorage.setItem("vq_token", r.token);
+    localStorage.setItem("vq_user", JSON.stringify(r.user));
+    location.href = HOME[r.user.role] || "/index.html";
+  } catch (e) { showErr(e.message); }
+});
+</script>
+</body></html>

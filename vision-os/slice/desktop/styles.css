@@ -1,0 +1,108 @@
+/* VisionOS shell prototype styles. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+.hidden { display: none !important; }
+
+/* Boot */
+#boot { position: fixed; inset: 0; background: #0b1020; color: #dfe8ff; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 1000; }
+.boot-logo { font-size: 64px; color: #7aa2ff; animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
+.boot-name { font-size: 34px; letter-spacing: 6px; }
+.boot-sub { font-size: 12px; color: #93a4c8; letter-spacing: 1px; }
+.boot-bar { width: 220px; height: 4px; background: #223; border-radius: 2px; overflow: hidden; }
+.boot-fill { height: 100%; width: 40%; background: #7aa2ff; border-radius: 2px; animation: slide 1.2s infinite; }
+@keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+
+/* Desktop */
+#desktop { position: fixed; inset: 0; background: #1a2b4a; }
+#prototype-banner { position: absolute; top: 0; left: 0; right: 0; z-index: 900;
+  background: #b45309; color: #fff; font-size: 11px; text-align: center; padding: 3px 8px; letter-spacing: .4px; }
+#icons { position: absolute; top: 40px; left: 14px; display: flex; flex-direction: column; gap: 14px; }
+.dicon { width: 76px; text-align: center; cursor: pointer; padding: 6px 2px; border-radius: 8px; }
+.dicon:hover, .dicon.sel { background: rgba(255,255,255,.14); }
+.dic { font-size: 34px; }
+.dlabel { color: #fff; font-size: 12px; text-shadow: 0 1px 3px #000; }
+
+/* Windows */
+#windows { position: absolute; inset: 26px 0 40px 0; }
+.window { position: absolute; background: #f4f6fb; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45); display: flex; flex-direction: column; min-width: 280px; min-height: 180px; }
+.titlebar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #dfe5f2;
+  cursor: grab; user-select: none; flex: 0 0 auto; }
+.window.active .titlebar { background: #c9d6f2; }
+.wtitle { font-weight: 600; font-size: 13px; flex: 1; }
+.wbtns { display: flex; gap: 4px; }
+.wbtns button { width: 26px; height: 22px; border: 1px solid #b9c4da; background: #fff; border-radius: 5px; cursor: pointer; font-size: 12px; }
+.wbtns button:hover { background: #e8edf8; }
+.wbody { flex: 1; overflow: auto; position: relative; background: #fff; }
+.resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #9fb0cc 50%); }
+.err { color: #b91c1c; padding: 16px; }
+
+/* Taskbar */
+#taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: rgba(10,16,32,.92);
+  display: flex; align-items: center; gap: 8px; padding: 0 10px; z-index: 950; }
+#launcher-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: #7aa2ff;
+  color: #0b1020; font-size: 18px; cursor: pointer; }
+#taskbar-windows { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
+.taskbtn { background: #22304f; color: #dfe8ff; border: none; border-radius: 6px; padding: 6px 10px;
+  font-size: 12px; cursor: pointer; white-space: nowrap; }
+.taskbtn.active { background: #3b5386; }
+#clock { color: #dfe8ff; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* Launcher */
+#launcher { position: absolute; left: 10px; bottom: 48px; z-index: 960; background: #101a30;
+  border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 200px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.litem { background: none; border: none; color: #dfe8ff; text-align: left; padding: 8px 10px;
+  border-radius: 8px; font-size: 14px; cursor: pointer; }
+.litem:hover { background: #22345c; }
+
+/* Files app */
+.ftoolbar { display: flex; gap: 6px; align-items: center; padding: 8px; background: #eef1f8; border-bottom: 1px solid #dde3f0; flex-wrap: wrap; }
+.ftoolbar button { padding: 5px 10px; border: 1px solid #b9c4da; background: #fff; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.ftoolbar button:hover { background: #e2e9f8; }
+.fpath { font-size: 12px; color: #556; margin-left: auto; font-family: monospace; }
+.fgrid { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; align-content: flex-start; min-height: 120px; }
+.fitem { width: 84px; text-align: center; padding: 8px 4px; border-radius: 8px; cursor: pointer; }
+.fitem:hover { background: #eef2fb; }
+.fitem.sel { background: #d7e3fb; outline: 1px solid #7aa2ff; }
+.fic { font-size: 30px; }
+.fname { font-size: 11px; word-break: break-word; }
+.fempty { color: #889; font-size: 13px; padding: 20px; }
+.fstatus { padding: 6px 10px; font-size: 11px; color: #667; border-top: 1px solid #e5e9f4; }
+.fstatus.bad { color: #b91c1c; }
+
+/* Notes */
+.ntoolbar { display: flex; gap: 6px; align-items: center; padding: 8px; background: #eef1f8; border-bottom: 1px solid #dde3f0; }
+.ntoolbar button { padding: 5px 12px; border: 1px solid #b9c4da; background: #fff; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.fname-label { font-size: 12px; color: #556; font-family: monospace; }
+.nedit { width: 100%; height: calc(100% - 88px); min-height: 200px; border: none; padding: 12px;
+  font-family: Consolas, monospace; font-size: 13px; resize: none; outline: none; }
+
+/* Terminal */
+.term { background: #0b1020; color: #c8f7c5; font-family: Consolas, monospace; font-size: 13px;
+  padding: 10px; height: 100%; overflow-y: auto; }
+.tline { display: flex; }
+.prompt { color: #7aa2ff; white-space: nowrap; }
+.tin { flex: 1; background: none; border: none; color: #c8f7c5; font: inherit; outline: none; }
+
+/* Settings */
+.setrow { display: flex; gap: 8px; align-items: center; padding: 14px; border-bottom: 1px solid #eef1f8; }
+.setrow label { width: 90px; font-weight: 600; font-size: 13px; }
+.setrow button { padding: 6px 14px; border: 1px solid #b9c4da; background: #fff; border-radius: 6px; cursor: pointer; min-width: 44px; }
+.setrow button:hover { background: #e2e9f8; }
+
+/* About */
+.about { padding: 24px; font-size: 13px; line-height: 1.6; color: #334; }
+.about-logo { font-size: 44px; color: #4a6fd4; }
+.about h2 { margin: 4px 0 10px; letter-spacing: 3px; }
+.about p { margin-bottom: 10px; }
+.about code { background: #eef1f8; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.dim { color: #889; }
+
+/* Light theme */
+body.light .window { background: #ffffff; }
+body.light .titlebar { background: #e8ecf5; }
+body.light .window.active .titlebar { background: #d3ddf3; }
