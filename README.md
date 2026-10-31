@@ -14,3 +14,7 @@ documents honestly what's real vs. what's a UX concept.
 - `vision-erp/` — CRM + HRMS + billing slice.
 
 See each module's README for its real-vs-prototype breakdown.
+
+## Built by VisionQuantech
+
+Part of the [VisionQuantech](https://visionquantech.com/) AI automation studio. See [AI automation services for small businesses](https://visionquantech.com/ai-automation-services) and the guide to [AI phone answering for auto repair shops](https://visionquantech.com/blog/ai-phone-answering-service-for-auto-repair-shops).
